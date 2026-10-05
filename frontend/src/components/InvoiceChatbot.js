@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { useLiveChat, LiveChatPanel } from './LiveChat';
 
 /* ─── Format Rupees ─────────────────────────────────────────── */
 const formatRupees = (amount) => {
@@ -35,6 +36,10 @@ const InvoiceChatbot = ({ user }) => {
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ]);
+
+  const [tab, setTab] = useState('assistant'); // 'assistant' | 'live'
+  const [activeThread, setActiveThread] = useState(null); // no conversation is open (so nothing is marked read) until the user picks one
+  const liveChat = useLiveChat(user, activeThread, isOpen && tab === 'live');
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -461,6 +466,11 @@ const InvoiceChatbot = ({ user }) => {
           opacity: 0.5;
           cursor: not-allowed;
         }
+        .ja-chatbot-tabs { display: flex; background: #f1f5f9; border-bottom: 1px solid #e2e8f0; }
+        .ja-chatbot-tab { flex: 1; padding: 9px 6px; border: none; background: transparent; cursor: pointer; font-size: 0.76rem; font-weight: 700; color: #64748b; border-bottom: 2px solid transparent; position: relative; }
+        .ja-chatbot-tab.active { color: #0072bc; background: #fff; border-bottom-color: #0072bc; }
+        .ja-chatbot-tab-badge { margin-left: 5px; background: #25d366; color: #fff; border-radius: 9999px; padding: 1px 6px; font-size: 0.62rem; }
+        .ja-fab-badge { position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9999px; background: #25d366; color: #fff; font-size: 0.65rem; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; }
         .ja-typing {
           display: flex;
           align-items: center;
@@ -499,6 +509,9 @@ const InvoiceChatbot = ({ user }) => {
           ) : (
             <span style={{ fontSize: 24 }}>🤖</span>
           )}
+          {!isOpen && liveChat.totalUnread > 0 && (
+            <span className="ja-fab-badge">{liveChat.totalUnread > 99 ? '99+' : liveChat.totalUnread}</span>
+          )}
         </button>
       </div>
 
@@ -534,7 +547,23 @@ const InvoiceChatbot = ({ user }) => {
             </div>
           </div>
 
+          {/* Tabs */}
+          <div className="ja-chatbot-tabs">
+            <button className={`ja-chatbot-tab ${tab === 'assistant' ? 'active' : ''}`} onClick={() => setTab('assistant')}>
+              🤖 Assistant
+            </button>
+            <button className={`ja-chatbot-tab ${tab === 'live' ? 'active' : ''}`} onClick={() => setTab('live')}>
+              💬 Live Messaging
+              {liveChat.totalUnread > 0 && <span className="ja-chatbot-tab-badge">{liveChat.totalUnread}</span>}
+            </button>
+          </div>
+
+          {tab === 'live' && (
+            <LiveChatPanel user={user} chat={liveChat} activeThread={activeThread} setActiveThread={setActiveThread} />
+          )}
+
           {/* Body / Messages */}
+          {tab === 'assistant' && (<>
           <div className="ja-chatbot-body">
             {messages.map(msg => (
               <div key={msg.id} className={`ja-chat-msg ${msg.sender}`}>
@@ -651,6 +680,7 @@ const InvoiceChatbot = ({ user }) => {
               ➔
             </button>
           </div>
+          </>)}
         </div>
       )}
     </>
