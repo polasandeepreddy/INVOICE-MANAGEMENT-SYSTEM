@@ -523,9 +523,9 @@ const InvoiceChatbot = ({ user }) => {
             <div className="ja-chatbot-header-info">
               <div className="ja-chatbot-avatar">🤖</div>
               <div>
-                <div className="ja-chatbot-title">Invoice Assistant</div>
+                <div className="ja-chatbot-title">{tab === 'live' ? 'Live Messaging' : 'Invoice Assistant'}</div>
                 <div className="ja-chatbot-sub">
-                  <span className="ja-chatbot-sub-dot" /> Live System Database Search
+                  <span className="ja-chatbot-sub-dot" /> {tab === 'live' ? 'Chat with your team' : 'Live System Database Search'}
                 </div>
               </div>
             </div>

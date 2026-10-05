@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import axios from 'axios';
 
 const POLL_MS = 3000;
+const HIDDEN_POLL_EVERY = 5; // browser tab in the background: poll every 5th tick (15s)
 const authHeaders = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
 const ALL = 'all'; // thread key for broadcast messages
 
@@ -23,14 +24,15 @@ export const useLiveChat = (user, activeThread, isVisible) => {
   const myId = user?.id;
   const [users, setUsers] = useState([]);
   const [messages, setMessages] = useState([]);
-  const [seen, setSeen] = useState({}); // thread -> last seen incoming message id (drives unread badges)
+  const [unreadByThread, setUnread] = useState({}); // thread -> unread count, computed by the server
+  const [readRetry, setReadRetry] = useState(0); // bumped to retry a failed /chat/read
   const [statuses, setStatuses] = useState({}); // my message id -> 'sent' | 'delivered' | 'read'
   const [connError, setConnError] = useState('');
   const [tabActive, setTabActive] = useState(() => document.visibilityState !== 'hidden');
   const lastIdRef = useRef(0);
   const usersRef = useRef([]);
   const reportedRef = useRef({}); // thread -> last incoming id already reported as read to the server
-  const seenKey = `ja-chat-seen-${myId}`;
+  const tickRef = useRef(0);
 
   useEffect(() => {
     const onVis = () => setTabActive(document.visibilityState !== 'hidden');
@@ -43,11 +45,11 @@ export const useLiveChat = (user, activeThread, isVisible) => {
     setMessages([]);
     setUsers([]);
     setStatuses({});
+    setUnread({});
     setConnError('');
     usersRef.current = [];
     reportedRef.current = {};
     lastIdRef.current = 0;
-    try { setSeen(JSON.parse(localStorage.getItem(seenKey)) || {}); } catch { setSeen({}); }
 
     let stopped = false;
     const loadUsers = async () => {
@@ -59,11 +61,13 @@ export const useLiveChat = (user, activeThread, isVisible) => {
       } catch { /* retried on the next interval */ }
     };
     const poll = async () => {
+      if (document.visibilityState === 'hidden' && tickRef.current++ % HIDDEN_POLL_EVERY !== 0) return;
       try {
         const res = await axios.get(`/api/chat/messages?after=${lastIdRef.current}`, authHeaders());
         if (stopped) return;
         setConnError('');
         if (res.data?.statuses) setStatuses(res.data.statuses);
+        if (res.data?.unread) setUnread(res.data.unread);
         const fresh = res.data?.messages || [];
         if (fresh.length === 0) return;
         lastIdRef.current = fresh[fresh.length - 1].id;
@@ -83,7 +87,7 @@ export const useLiveChat = (user, activeThread, isVisible) => {
     const t = setInterval(poll, POLL_MS);
     const u = setInterval(loadUsers, 20000);
     return () => { stopped = true; clearInterval(t); clearInterval(u); };
-  }, [myId, seenKey]);
+  }, [myId]);
 
   // Latest incoming (not sent by me) message id per thread.
   const latestIncoming = useMemo(() => {
@@ -101,28 +105,15 @@ export const useLiveChat = (user, activeThread, isVisible) => {
   useEffect(() => {
     if (!myId || !isVisible || !tabActive || !activeThread) return;
     const latest = latestIncoming[activeThread] || 0;
-    if (!latest) return;
-    if ((reportedRef.current[activeThread] || 0) < latest) {
-      reportedRef.current[activeThread] = latest;
-      axios.post('/api/chat/read', { thread: activeThread }, authHeaders())
-        .catch(() => { reportedRef.current[activeThread] = 0; }); // retry on the next update
-    }
-    if ((seen[activeThread] || 0) < latest) {
-      const next = { ...seen, [activeThread]: latest };
-      setSeen(next);
-      try { localStorage.setItem(seenKey, JSON.stringify(next)); } catch { /* ignore */ }
-    }
-  }, [latestIncoming, activeThread, isVisible, tabActive, myId, seen, seenKey]);
-
-  const unreadByThread = useMemo(() => {
-    const out = {};
-    messages.forEach(m => {
-      if (m.sender_id === myId) return;
-      const th = threadOf(m, myId);
-      if (m.id > (seen[th] || 0)) out[th] = (out[th] || 0) + 1;
-    });
-    return out;
-  }, [messages, seen, myId]);
+    if (!latest || (reportedRef.current[activeThread] || 0) >= latest) return;
+    reportedRef.current[activeThread] = latest;
+    setUnread(prev => (prev[activeThread] ? { ...prev, [activeThread]: 0 } : prev));
+    axios.post('/api/chat/read', { thread: activeThread }, authHeaders())
+      .catch(() => {
+        reportedRef.current[activeThread] = 0;
+        setTimeout(() => setReadRetry(n => n + 1), POLL_MS); // retry shortly
+      });
+  }, [latestIncoming, activeThread, isVisible, tabActive, myId, readRetry]);
 
   const totalUnread = Object.values(unreadByThread).reduce((a, b) => a + b, 0);
 

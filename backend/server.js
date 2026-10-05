@@ -4694,7 +4694,7 @@ app.get('/api/test', (req, res) => {
 app.get('/api/chat/users', authenticateToken, async (req, res) => {
     try {
         const [rows] = await promiseDb.execute(
-            'SELECT id, full_name, username, role FROM users WHERE id <> ? ORDER BY full_name, username',
+            'SELECT id, full_name, username FROM users WHERE id <> ? ORDER BY full_name, username',
             [req.user.id]
         );
         res.json({ success: true, users: rows });
@@ -4703,6 +4703,9 @@ app.get('/api/chat/users', authenticateToken, async (req, res) => {
         res.status(500).json({ error: 'Failed to load users' });
     }
 });
+
+// Broadcasts are only visible from the moment the user's account existed.
+const CHAT_BROADCAST_VISIBLE = '(m.recipient_id IS NULL AND m.sender_id <> ? AND m.created_at >= (SELECT created_at FROM users WHERE id = ?))';
 
 app.get('/api/chat/messages', authenticateToken, async (req, res) => {
     try {
@@ -4714,38 +4717,47 @@ app.get('/api/chat/messages', authenticateToken, async (req, res) => {
             `INSERT IGNORE INTO chat_receipts (message_id, user_id, delivered_at)
              SELECT m.id, ?, NOW() FROM chat_messages m
              LEFT JOIN chat_receipts r ON r.message_id = m.id AND r.user_id = ?
-             WHERE m.sender_id <> ? AND (m.recipient_id = ? OR m.recipient_id IS NULL) AND r.message_id IS NULL`,
-            [me, me, me, me]
+             WHERE r.message_id IS NULL AND m.sender_id <> ? AND (m.recipient_id = ? OR ${CHAT_BROADCAST_VISIBLE})`,
+            [me, me, me, me, me, me]
         );
 
-        const [rows] = await promiseDb.query(
-            `SELECT * FROM (
-                SELECT m.id, m.sender_id, m.recipient_id, m.body, m.created_at,
-                       COALESCE(u.full_name, u.username) AS sender_name
-                FROM chat_messages m
-                LEFT JOIN users u ON u.id = m.sender_id
-                WHERE m.id > ? AND (m.sender_id = ? OR m.recipient_id = ? OR m.recipient_id IS NULL)
-                ORDER BY m.id DESC LIMIT 300
-            ) t ORDER BY id ASC`,
-            [after, me, me]
-        );
+        // First load (after=0): the latest 300. Afterwards: page forward from the cursor so nothing is skipped.
+        const visible = `(m.sender_id = ? OR m.recipient_id = ? OR (m.recipient_id IS NULL AND m.created_at >= (SELECT created_at FROM users WHERE id = ?)))`;
+        const select = `SELECT m.id, m.sender_id, m.recipient_id, m.body, m.created_at, COALESCE(u.full_name, u.username) AS sender_name
+                FROM chat_messages m LEFT JOIN users u ON u.id = m.sender_id`;
+        const [rows] = after > 0
+            ? await promiseDb.query(`${select} WHERE m.id > ? AND ${visible} ORDER BY m.id ASC LIMIT 300`, [after, me, me, me])
+            : await promiseDb.query(`SELECT * FROM (${select} WHERE ${visible} ORDER BY m.id DESC LIMIT 300) t ORDER BY id ASC`, [me, me, me]);
 
-        // Ticks for my recent sent messages: sent / delivered / read (broadcasts need every recipient).
-        const [[{ n: userCount }]] = await promiseDb.query('SELECT COUNT(*) AS n FROM users');
+        // Ticks for my recent sent messages. A broadcast needs every user that existed when it was sent.
         const [sent] = await promiseDb.query(
-            `SELECT m.id, m.recipient_id, COUNT(r.user_id) AS delivered, COALESCE(SUM(r.read_at IS NOT NULL), 0) AS read_count
-             FROM (SELECT id, recipient_id FROM chat_messages WHERE sender_id = ? ORDER BY id DESC LIMIT 200) m
+            `SELECT m.id, m.recipient_id,
+                    COUNT(r.user_id) AS delivered, COALESCE(SUM(r.read_at IS NOT NULL), 0) AS read_count,
+                    (SELECT COUNT(*) FROM users x WHERE x.id <> m.sender_id AND x.created_at <= m.created_at) AS audience
+             FROM (SELECT id, sender_id, recipient_id, created_at FROM chat_messages WHERE sender_id = ? ORDER BY id DESC LIMIT 200) m
              LEFT JOIN chat_receipts r ON r.message_id = m.id
-             GROUP BY m.id, m.recipient_id`,
+             GROUP BY m.id, m.sender_id, m.recipient_id, m.created_at`,
             [me]
         );
         const statuses = {};
         sent.forEach(m => {
-            const total = m.recipient_id ? 1 : Math.max(userCount - 1, 1);
+            const total = m.recipient_id ? 1 : Math.max(Number(m.audience), 1);
             statuses[m.id] = Number(m.read_count) >= total ? 'read' : Number(m.delivered) >= total ? 'delivered' : 'sent';
         });
 
-        res.json({ success: true, messages: rows, statuses });
+        // Unread incoming messages per thread (server-side, so it survives new browsers/devices).
+        const [unreadRows] = await promiseDb.query(
+            `SELECT IF(m.recipient_id IS NULL, 'all', m.sender_id) AS thread, COUNT(*) AS n
+             FROM chat_messages m
+             LEFT JOIN chat_receipts r ON r.message_id = m.id AND r.user_id = ?
+             WHERE r.read_at IS NULL AND m.sender_id <> ? AND (m.recipient_id = ? OR ${CHAT_BROADCAST_VISIBLE})
+             GROUP BY thread`,
+            [me, me, me, me, me]
+        );
+        const unread = {};
+        unreadRows.forEach(u => { unread[u.thread] = Number(u.n); });
+
+        res.json({ success: true, messages: rows, statuses, unread });
     } catch (error) {
         console.error('Chat fetch error:', error);
         res.status(500).json({ error: 'Failed to load messages' });
@@ -4758,12 +4770,12 @@ app.post('/api/chat/read', authenticateToken, async (req, res) => {
         const me = req.user.id;
         const thread = String(req.body.thread || '');
         if (!thread) return res.status(400).json({ error: 'thread required' });
-        const where = thread === 'all' ? 'm.recipient_id IS NULL AND m.sender_id <> ?' : 'm.recipient_id = ? AND m.sender_id = ?';
+        const where = thread === 'all' ? CHAT_BROADCAST_VISIBLE : 'm.recipient_id = ? AND m.sender_id = ?';
         await promiseDb.query(
             `INSERT INTO chat_receipts (message_id, user_id, delivered_at, read_at)
              SELECT m.id, ?, NOW(), NOW() FROM chat_messages m WHERE ${where}
              ON DUPLICATE KEY UPDATE read_at = COALESCE(read_at, VALUES(read_at))`,
-            thread === 'all' ? [me, me] : [me, me, thread]
+            thread === 'all' ? [me, me, me] : [me, me, thread]
         );
         res.json({ success: true });
     } catch (error) {
