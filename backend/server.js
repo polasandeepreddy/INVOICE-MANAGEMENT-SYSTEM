@@ -781,6 +781,31 @@ async function initializeDatabase() {
             )
         `);
 
+        // Live chat messages (recipient_id NULL = broadcast to everyone)
+        await promiseDb.execute(`
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                sender_id VARCHAR(50) NOT NULL,
+                recipient_id VARCHAR(50) NULL,
+                body TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_chat_recipient (recipient_id, id),
+                INDEX idx_chat_sender (sender_id, id)
+            )
+        `);
+
+        // Per-recipient delivery/read receipts for chat messages
+        await promiseDb.execute(`
+            CREATE TABLE IF NOT EXISTS chat_receipts (
+                message_id BIGINT NOT NULL,
+                user_id VARCHAR(50) NOT NULL,
+                delivered_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                read_at TIMESTAMP NULL,
+                PRIMARY KEY (message_id, user_id),
+                INDEX idx_receipt_user (user_id)
+            )
+        `);
+
         // Create Banks Table (Bank Master Data)
         await promiseDb.execute(`
             CREATE TABLE IF NOT EXISTS banks (
@@ -4660,6 +4685,133 @@ app.get('/api/test', (req, res) => {
             eSign: '/api/invoices/:id/request-esign, /api/invoices/:id/final-esign, /api/invoices/:id/download-signed-pdf'
         }
     });
+});
+
+// ============= LIVE CHAT =============
+// A message is visible only to its sender, its single recipient, or everyone
+// when it is a broadcast (recipient_id IS NULL). All filtering happens here.
+
+app.get('/api/chat/users', authenticateToken, async (req, res) => {
+    try {
+        const [rows] = await promiseDb.execute(
+            'SELECT id, full_name, username FROM users WHERE id <> ? ORDER BY full_name, username',
+            [req.user.id]
+        );
+        res.json({ success: true, users: rows });
+    } catch (error) {
+        console.error('Chat users error:', error);
+        res.status(500).json({ error: 'Failed to load users' });
+    }
+});
+
+// Broadcasts are only visible from the moment the user's account existed.
+const CHAT_BROADCAST_VISIBLE = '(m.recipient_id IS NULL AND m.sender_id <> ? AND m.created_at >= (SELECT created_at FROM users WHERE id = ?))';
+
+app.get('/api/chat/messages', authenticateToken, async (req, res) => {
+    try {
+        const me = req.user.id;
+        const after = parseInt(req.query.after, 10) || 0;
+
+        // The poll itself proves the recipient has the site open -> mark everything addressed to them as delivered.
+        await promiseDb.query(
+            `INSERT IGNORE INTO chat_receipts (message_id, user_id, delivered_at)
+             SELECT m.id, ?, NOW() FROM chat_messages m
+             LEFT JOIN chat_receipts r ON r.message_id = m.id AND r.user_id = ?
+             WHERE r.message_id IS NULL AND m.sender_id <> ? AND (m.recipient_id = ? OR ${CHAT_BROADCAST_VISIBLE})`,
+            [me, me, me, me, me, me]
+        );
+
+        // First load (after=0): the latest 300. Afterwards: page forward from the cursor so nothing is skipped.
+        const visible = `(m.sender_id = ? OR m.recipient_id = ? OR (m.recipient_id IS NULL AND m.created_at >= (SELECT created_at FROM users WHERE id = ?)))`;
+        const select = `SELECT m.id, m.sender_id, m.recipient_id, m.body, m.created_at, COALESCE(u.full_name, u.username) AS sender_name
+                FROM chat_messages m LEFT JOIN users u ON u.id = m.sender_id`;
+        const [rows] = after > 0
+            ? await promiseDb.query(`${select} WHERE m.id > ? AND ${visible} ORDER BY m.id ASC LIMIT 300`, [after, me, me, me])
+            : await promiseDb.query(`SELECT * FROM (${select} WHERE ${visible} ORDER BY m.id DESC LIMIT 300) t ORDER BY id ASC`, [me, me, me]);
+
+        // Ticks for my recent sent messages. A broadcast needs every user that existed when it was sent.
+        const [sent] = await promiseDb.query(
+            `SELECT m.id, m.recipient_id,
+                    COUNT(r.user_id) AS delivered, COALESCE(SUM(r.read_at IS NOT NULL), 0) AS read_count,
+                    (SELECT COUNT(*) FROM users x WHERE x.id <> m.sender_id AND x.created_at <= m.created_at) AS audience
+             FROM (SELECT id, sender_id, recipient_id, created_at FROM chat_messages WHERE sender_id = ? ORDER BY id DESC LIMIT 200) m
+             LEFT JOIN chat_receipts r ON r.message_id = m.id
+             GROUP BY m.id, m.sender_id, m.recipient_id, m.created_at`,
+            [me]
+        );
+        const statuses = {};
+        sent.forEach(m => {
+            const total = m.recipient_id ? 1 : Math.max(Number(m.audience), 1);
+            statuses[m.id] = Number(m.read_count) >= total ? 'read' : Number(m.delivered) >= total ? 'delivered' : 'sent';
+        });
+
+        // Unread incoming messages per thread (server-side, so it survives new browsers/devices).
+        const [unreadRows] = await promiseDb.query(
+            `SELECT IF(m.recipient_id IS NULL, 'all', m.sender_id) AS thread, COUNT(*) AS n
+             FROM chat_messages m
+             LEFT JOIN chat_receipts r ON r.message_id = m.id AND r.user_id = ?
+             WHERE r.read_at IS NULL AND m.sender_id <> ? AND (m.recipient_id = ? OR ${CHAT_BROADCAST_VISIBLE})
+             GROUP BY thread`,
+            [me, me, me, me, me]
+        );
+        const unread = {};
+        unreadRows.forEach(u => { unread[u.thread] = Number(u.n); });
+
+        res.json({ success: true, messages: rows, statuses, unread });
+    } catch (error) {
+        console.error('Chat fetch error:', error);
+        res.status(500).json({ error: 'Failed to load messages' });
+    }
+});
+
+// Recipient opened a conversation -> mark its messages as read. thread = 'all' or the other user's id.
+app.post('/api/chat/read', authenticateToken, async (req, res) => {
+    try {
+        const me = req.user.id;
+        const thread = String(req.body.thread || '');
+        if (!thread) return res.status(400).json({ error: 'thread required' });
+        const where = thread === 'all' ? CHAT_BROADCAST_VISIBLE : 'm.recipient_id = ? AND m.sender_id = ?';
+        await promiseDb.query(
+            `INSERT INTO chat_receipts (message_id, user_id, delivered_at, read_at)
+             SELECT m.id, ?, NOW(), NOW() FROM chat_messages m WHERE ${where}
+             ON DUPLICATE KEY UPDATE read_at = COALESCE(read_at, VALUES(read_at))`,
+            thread === 'all' ? [me, me, me] : [me, me, thread]
+        );
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Chat read error:', error);
+        res.status(500).json({ error: 'Failed to mark read' });
+    }
+});
+
+app.post('/api/chat/messages', authenticateToken, async (req, res) => {
+    try {
+        const body = String(req.body.body || '').trim();
+        const recipientId = req.body.recipient_id || null; // null = send to all
+        if (!body) return res.status(400).json({ error: 'Message cannot be empty' });
+        if (body.length > 2000) return res.status(400).json({ error: 'Message too long (max 2000 characters)' });
+
+        if (recipientId) {
+            if (recipientId === req.user.id) return res.status(400).json({ error: 'Cannot message yourself' });
+            const [exists] = await promiseDb.execute('SELECT id FROM users WHERE id = ?', [recipientId]);
+            if (exists.length === 0) return res.status(404).json({ error: 'Recipient not found' });
+        }
+
+        const [result] = await promiseDb.execute(
+            'INSERT INTO chat_messages (sender_id, recipient_id, body) VALUES (?, ?, ?)',
+            [req.user.id, recipientId, body]
+        );
+        const [rows] = await promiseDb.execute(
+            `SELECT m.id, m.sender_id, m.recipient_id, m.body, m.created_at,
+                    COALESCE(u.full_name, u.username) AS sender_name
+             FROM chat_messages m LEFT JOIN users u ON u.id = m.sender_id WHERE m.id = ?`,
+            [result.insertId]
+        );
+        res.json({ success: true, message: rows[0] });
+    } catch (error) {
+        console.error('Chat send error:', error);
+        res.status(500).json({ error: 'Failed to send message' });
+    }
 });
 
 // ============= SERVER STARTUP =============
