@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Jayarama Associates | eSign Portal with Live Preview</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=Sora:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #eef2f8 0%, #f9fafc 100%);
+            font-family: 'DM Sans', -apple-system, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        .esign-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(11, 30, 53, 0.65);
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            animation: fadeIn 0.2s ease;
+        }
+
+        .esign-modal-split {
+            background: #ffffff;
+            border-radius: 32px;
+            width: 95%;
+            max-width: 1300px;
+            height: 88vh;
+            max-height: 860px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+            animation: scaleIn 0.28s cubic-bezier(0.34, 1.2, 0.64, 1);
+            overflow: hidden;
+            border: 1px solid rgba(15, 76, 129, 0.15);
+        }
+
+        .modal-header-split {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 32px;
+            border-bottom: 1px solid #eef2f8;
+            background: white;
+        }
+
+        .modal-title-area h2 {
+            font-family: 'Sora', sans-serif;
+            font-weight: 800;
+            font-size: 1.5rem;
+            color: #0b1e35;
+            letter-spacing: -0.02em;
+        }
+
+        .modal-title-area p {
+            font-size: 0.8rem;
+            color: #7a96b5;
+            margin-top: 6px;
+        }
+
+        .close-modal {
+            width: 36px;
+            height: 36px;
+            background: #f1f5f9;
+            border: none;
+            border-radius: 50%;
+            font-size: 22px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #3d5a7a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .close-modal:hover {
+            background: #e2e8f0;
+            transform: rotate(90deg);
+            color: #0f4c81;
+        }
+
+        .split-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            gap: 1px;
+            background: #eef2f8;
+        }
+
+        .left-options-panel {
+            flex: 1.2;
+            background: #ffffff;
+            overflow-y: auto;
+            padding: 28px 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 28px;
+        }
+
+        .right-preview-panel {
+            flex: 1;
+            background: #fbfdff;
+            border-left: 1px solid #e2edf7;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            padding: 28px 30px;
+            box-shadow: -4px 0 12px rgba(0, 0, 0, 0.02);
+        }
+
+        .sig-option-card {
+            border: 2px solid #e9edf2;
+            border-radius: 28px;
+            padding: 20px 24px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: #ffffff;
+        }
+
+        .sig-option-card.selected {
+            border-color: #0f4c81;
+            background: #f5faff;
+            box-shadow: 0 8px 20px rgba(15, 76, 129, 0.08);
+        }
+
+        .sig-option-card:hover {
+            border-color: #4a9fd4;
+            background: #fafdff;
+        }
+
+        .option-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .radio-custom {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            border: 2px solid #cbd5e1;
+            background: white;
+            display: inline-block;
+            transition: all 0.1s;
+        }
+
+        .selected .radio-custom {
+            border-color: #0f4c81;
+            background: #0f4c81;
+            box-shadow: inset 0 0 0 4px white;
+        }
+
+        .option-title {
+            font-weight: 700;
+            font-size: 1rem;
+            color: #0b1e35;
+        }
+
+        .option-desc {
+            font-size: 0.75rem;
+            color: #7a96b5;
+            margin-top: 6px;
+            margin-left: 36px;
+        }
+
+        .draw-area {
+            margin-top: 16px;
+            background: #fefefe;
+            border-radius: 20px;
+            border: 1px solid #e2edf7;
+            padding: 12px;
+        }
+
+        .signature-canvas-wrapper {
+            border: 1px solid #cbddee;
+            border-radius: 16px;
+            background: white;
+        }
+
+        canvas {
+            width: 100%;
+            height: auto;
+            background: white;
+            border-radius: 12px;
+            display: block;
+        }
+
+        .draw-toolbar {
+            display: flex;
+            gap: 12px;
+            margin-top: 14px;
+            justify-content: flex-end;
+        }
+
+        .small-btn {
+            background: #f1f5f9;
+            border: none;
+            border-radius: 40px;
+            padding: 6px 16px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: #1e293b;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        .small-btn:hover {
+            background: #e2e8f0;
+        }
+
+        .type-input-group {
+            margin-top: 16px;
+        }
+
+        .type-input {
+            width: 100%;
+            padding: 14px 18px;
+            border: 1.5px solid #e2edf7;
+            border-radius: 40px;
+            font-size: 1rem;
+            font-family: 'DM Sans', monospace;
+            transition: 0.2s;
+        }
+
+        .type-input:focus {
+            border-color: #0f4c81;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(15, 76, 129, 0.1);
+        }
+
+        .cloud-badge {
+            background: #ecfdf5;
+            border-radius: 24px;
+            padding: 18px;
+            margin-top: 16px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            border: 1px solid #ccf0e3;
+        }
+
+        .cloud-icon {
+            background: #0f4c81;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+        }
+
+        .preview-header {
+            font-weight: 700;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: #5b7a9a;
+            margin-bottom: 24px;
+            border-left: 3px solid #0f4c81;
+            padding-left: 16px;
+        }
+
+        .signature-preview-card {
+            background: #ffffff;
+            border-radius: 28px;
+            border: 1px solid #eef2f8;
+            padding: 32px 24px;
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.04);
+            text-align: center;
+            transition: all 0.2s;
+        }
+
+        .preview-image-container {
+            min-height: 240px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #fefefe;
+            border-radius: 24px;
+            margin-bottom: 20px;
+        }
+
+        .preview-img {
+            max-width: 100%;
+            max-height: 200px;
+            object-fit: contain;
+            border-radius: 16px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        .preview-placeholder {
+            color: #a0bbd9;
+            font-size: 0.9rem;
+            font-style: italic;
+            padding: 50px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .invoice-stamp {
+            margin-top: 28px;
+            padding-top: 20px;
+            border-top: 1px dashed #cbddee;
+            font-size: 0.7rem;
+            color: #5b7a9a;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .action-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 20px;
+            padding: 20px 32px;
+            border-top: 1px solid #eef2f8;
+            background: white;
+        }
+
+        .btn-cancel {
+            background: #f1f5f9;
+            border: none;
+            padding: 12px 28px;
+            border-radius: 40px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: 0.2s;
+            color: #1e293b;
+        }
+
+        .btn-confirm {
+            background: #0f4c81;
+            border: none;
+            padding: 12px 32px;
+            border-radius: 40px;
+            font-weight: 700;
+            font-size: 0.85rem;
+            color: white;
+            cursor: pointer;
+            box-shadow: 0 6px 14px rgba(15, 76, 129, 0.3);
+            transition: 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-confirm:hover {
+            background: #1a6bb5;
+            transform: translateY(-1px);
+        }
+
+        .btn-confirm:disabled {
+            background: #9bb7d4;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .error-msg {
+            color: #e8394f;
+            font-size: 0.75rem;
+            margin-top: 12px;
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes scaleIn {
+            from { opacity: 0; transform: scale(0.96); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #eef2f8;
+            border-radius: 10px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #bfd5f0;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+<div id="esign-root"></div>
+
+<script>
+    (function() {
+        const INVOICE_NUMBER = "JA/26-27/125";
+        let isSubmitting = false;
+
+        function generateTypedSignature(fullName) {
+            if (!fullName.trim()) return null;
+            const canvas = document.createElement('canvas');
+            canvas.width = 560;
+            canvas.height = 190;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.font = 'italic 34px "Brush Script MT", "Segoe Script", cursive';
+            ctx.fillStyle = '#0b1e35';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(fullName, 28, 80);
+            ctx.font = '12px "DM Sans", monospace';
+            ctx.fillStyle = '#5b7a9a';
+            ctx.fillText(`Digitally signed by: ${fullName}`, 28, 130);
+            ctx.fillText(new Date().toLocaleString(), 28, 155);
+            return canvas.toDataURL('image/png');
+        }
+
+        function generateCloudPreview() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 560;
+            canvas.height = 160;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.font = 'bold 16px "DM Sans"';
+            ctx.fillStyle = '#0f4c81';
+            ctx.fillText('✓ Digitally Signed via CloudSigner', 35, 50);
+            ctx.font = '12px monospace';
+            ctx.fillStyle = '#2c6e9e';
+            ctx.fillText('Digital Signature Certificate (DSC) · Linux CloudSigner', 35, 90);
+            ctx.fillText(`Timestamp: ${new Date().toLocaleString()}`, 35, 125);
+            return canvas.toDataURL('image/png');
+        }
+
+        let container = null;
+        let signaturePadInstance = null;
+        let currentMode = 'draw';
+        let typedNameValue = '';
+        let previewImg = null;
+        let previewPlaceholder = null;
+        let confirmBtn = null;
+        let errorSpan = null;
+        let drawPanel = null, typePanel = null, cloudPanel = null;
+
+        function updateLivePreview() {
+            let newPreview = '';
+            if (currentMode === 'draw') {
+                if (signaturePadInstance && !signaturePadInstance.isEmpty()) {
+                    newPreview = signaturePadInstance.toDataURL('image/png');
+                }
+            } 
+            else if (currentMode === 'type') {
+                if (typedNameValue && typedNameValue.trim().length > 0) {
+                    newPreview = generateTypedSignature(typedNameValue.trim());
+                }
+            }
+            else if (currentMode === 'cloud') {
+                newPreview = generateCloudPreview();
+            }
+            
+            if (newPreview && newPreview !== '') {
+                previewImg.src = newPreview;
+                previewImg.style.display = 'block';
+                if (previewPlaceholder) previewPlaceholder.style.display = 'none';
+            } else {
+                previewImg.style.display = 'none';
+                if (previewPlaceholder) previewPlaceholder.style.display = 'flex';
+            }
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.querySelectorAll('.sig-option-card').forEach(card => {
+                const cardMode = card.getAttribute('data-mode');
+                if (cardMode === mode) card.classList.add('selected');
+                else card.classList.remove('selected');
+            });
+            
+            if (drawPanel) drawPanel.style.display = mode === 'draw' ? 'block' : 'none';
+            if (typePanel) typePanel.style.display = mode === 'type' ? 'block' : 'none';
+            if (cloudPanel) cloudPanel.style.display = mode === 'cloud' ? 'block' : 'none';
+            
+            if (mode === 'draw' && signaturePadInstance) updateLivePreview();
+            else if (mode === 'type') updateLivePreview();
+            else if (mode === 'cloud') updateLivePreview();
+            
+            if (errorSpan) errorSpan.innerText = '';
+        }
+
+        function handleClearDraw() {
+            if (signaturePadInstance) {
+                signaturePadInstance.clear();
+                updateLivePreview();
+            }
+        }
+
+        function validateAndConfirm() {
+            if (currentMode === 'draw') {
+                if (!signaturePadInstance || signaturePadInstance.isEmpty()) {
+                    if (errorSpan) errorSpan.innerText = '⚠️ Please draw your signature before confirming.';
+                    return false;
+                }
+            } 
+            else if (currentMode === 'type') {
+                if (!typedNameValue.trim()) {
+                    if (errorSpan) errorSpan.innerText = '⚠️ Please type your full name to generate signature.';
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        async function onConfirm() {
+            if (!validateAndConfirm()) return;
+            if (isSubmitting) return;
+            isSubmitting = true;
+            if (confirmBtn) {
+                confirmBtn.disabled = true;
+                confirmBtn.innerHTML = `<span style="display:inline-block; width:16px; height:16px; border:2px solid white; border-top-color:transparent; border-radius:50%; animation:spin 0.7s linear infinite;"></span> Processing...`;
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 1300));
+            
+            let signaturePayload = null;
+            let signatureMode = currentMode;
+            if (currentMode === 'draw') {
+                signaturePayload = signaturePadInstance.toDataURL('image/png');
+            } else if (currentMode === 'type') {
+                signaturePayload = generateTypedSignature(typedNameValue.trim());
+            } else if (currentMode === 'cloud') {
+                signaturePayload = 'CLOUDSIGNER_DSC_LINUX_CERT';
+            }
+            
+            alert(`✅ Invoice ${INVOICE_NUMBER} successfully signed via ${signatureMode.toUpperCase()}!\n${signatureMode === 'cloud' ? 'Digital Certificate (CloudSigner) applied.' : 'Signature recorded.'}`);
+            closeModal();
+        }
+
+        function closeModal() {
+            if (container) container.remove();
+        }
+
+        function initSignaturePad(canvasElem) {
+            if (!canvasElem) return null;
+            const pad = new SignaturePad(canvasElem, {
+                penColor: '#0b1e35',
+                backgroundColor: '#ffffff',
+                throttle: 0,
+                minWidth: 1,
+                maxWidth: 2.5
+            });
+            const resizeCanvas = () => {
+                const ratio = Math.max(window.devicePixelRatio || 1, 1);
+                const width = canvasElem.offsetWidth;
+                const height = 200;
+                canvasElem.width = width * ratio;
+                canvasElem.height = height * ratio;
+                canvasElem.style.width = `${width}px`;
+                canvasElem.style.height = `${height}px`;
+                if (pad) pad.clear();
+            };
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            return pad;
+        }
+
+        function renderModal() {
+            container = document.createElement('div');
+            container.className = 'esign-overlay';
+            container.innerHTML = `
+                <div class="esign-modal-split">
+                    <div class="modal-header-split">
+                        <div class="modal-title-area">
+                            <h2>✍️ Final eSign Approval</h2>
+                            <p>Invoice #${INVOICE_NUMBER}</p>
+                        </div>
+                        <button class="close-modal" id="closeModalBtn">×</button>
+                    </div>
+                    <div class="split-content">
+                        <div class="left-options-panel">
+                            <div class="sig-option-card selected" data-mode="draw" id="optionDraw">
+                                <div class="option-header">
+                                    <span class="radio-custom"></span>
+                                    <span class="option-title">🖌️ Draw Signature</span>
+                                </div>
+                                <div class="option-desc">Use your mouse or touch to sign</div>
+                                <div id="drawPanel" style="display: block; margin-top: 14px;">
+                                    <div class="draw-area">
+                                        <div class="signature-canvas-wrapper">
+                                            <canvas id="signatureCanvas" width="500" height="200" style="width:100%; height:auto; min-height:160px; background:white;"></canvas>
+                                        </div>
+                                        <div class="draw-toolbar">
+                                            <button type="button" id="clearDrawBtn" class="small-btn">🗑️ Clear</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="sig-option-card" data-mode="type" id="optionType">
+                                <div class="option-header">
+                                    <span class="radio-custom"></span>
+                                    <span class="option-title">⌨️ Type Signature</span>
+                                </div>
+                                <div class="option-desc">Your name in signature style</div>
+                                <div id="typePanel" style="display: none; margin-top: 14px;">
+                                    <div class="type-input-group">
+                                        <input type="text" id="typedSignatureInput" class="type-input" placeholder="e.g., Arjun Mehta" autocomplete="off">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="sig-option-card" data-mode="cloud" id="optionCloud">
+                                <div class="option-header">
+                                    <span class="radio-custom"></span>
+                                    <span class="option-title">☁️ Digital Signature (CloudSigner)</span>
+                                </div>
+                                <div class="option-desc">Linux CloudSigner service (Digital Certificate)</div>
+                                <div id="cloudPanel" style="display: none; margin-top: 14px;">
+                                    <div class="cloud-badge">
+                                        <div class="cloud-icon">🔒</div>
+                                        <div style="font-size:0.8rem; line-height:1.5;">Your invoice will be digitally signed using the Linux CloudSigner service with a valid DSC.</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="right-preview-panel">
+                            <div class="preview-header">🔍 LIVE SIGNATURE PREVIEW</div>
+                            <div class="signature-preview-card">
+                                <div class="preview-image-container">
+                                    <img id="previewSignatureImg" class="preview-img" style="display:none;" alt="Signature preview" />
+                                    <div id="previewPlaceholder" class="preview-placeholder">
+                                        <span>✍️</span>
+                                        <span>Signature preview will appear here</span>
+                                        <small style="font-size:0.7rem;">Select a method and provide input</small>
+                                    </div>
+                                </div>
+                                <div class="invoice-stamp">
+                                    <span>Invoice: ${INVOICE_NUMBER}</span>
+                                    <span>Jayarama Associates</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="action-buttons">
+                        <button class="btn-cancel" id="cancelBtn">Cancel</button>
+                        <button class="btn-confirm" id="confirmBtn">✓ Confirm eSign</button>
+                    </div>
+                    <div id="globalError" style="padding: 0 32px 20px 32px; font-size:0.75rem; color:#e8394f;"></div>
+                </div>
+            `;
+            document.body.appendChild(container);
+            
+            const canvasElem = document.getElementById('signatureCanvas');
+            const clearDrawBtn = document.getElementById('clearDrawBtn');
+            const typedInput = document.getElementById('typedSignatureInput');
+            previewImg = document.getElementById('previewSignatureImg');
+            previewPlaceholder = document.getElementById('previewPlaceholder');
+            confirmBtn = document.getElementById('confirmBtn');
+            const cancelBtn = document.getElementById('cancelBtn');
+            const closeBtn = document.getElementById('closeModalBtn');
+            errorSpan = document.getElementById('globalError');
+            drawPanel = document.getElementById('drawPanel');
+            typePanel = document.getElementById('typePanel');
+            cloudPanel = document.getElementById('cloudPanel');
+            
+            if (canvasElem) {
+                signaturePadInstance = initSignaturePad(canvasElem);
+                if (signaturePadInstance) {
+                    signaturePadInstance.onEnd = () => updateLivePreview();
+                }
+            }
+            
+            if (clearDrawBtn) clearDrawBtn.onclick = () => handleClearDraw();
+            if (typedInput) {
+                typedInput.addEventListener('input', (e) => {
+                    typedNameValue = e.target.value;
+                    updateLivePreview();
+                });
+            }
+            
+            const drawCard = document.getElementById('optionDraw');
+            const typeCard = document.getElementById('optionType');
+            const cloudCard = document.getElementById('optionCloud');
+            if (drawCard) drawCard.addEventListener('click', () => setMode('draw'));
+            if (typeCard) typeCard.addEventListener('click', () => setMode('type'));
+            if (cloudCard) cloudCard.addEventListener('click', () => setMode('cloud'));
+            
+            if (confirmBtn) confirmBtn.addEventListener('click', onConfirm);
+            const closeHandler = () => closeModal();
+            if (cancelBtn) cancelBtn.addEventListener('click', closeHandler);
+            if (closeBtn) closeBtn.addEventListener('click', closeHandler);
+            
+            setMode('draw');
+            if (signaturePadInstance) signaturePadInstance.clear();
+            setTimeout(() => updateLivePreview(), 30);
+        }
+        
+        renderModal();
+    })();
+</script>
+</body>
+</html>

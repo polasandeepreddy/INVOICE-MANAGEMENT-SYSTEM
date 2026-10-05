@@ -1,0 +1,64 @@
+{
+  "name": "frontend",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^13.5.0",
+    "axios": "^1.15.2",
+    "chart.js": "^4.5.1",
+    "concurrently": "^9.2.1",
+    "exceljs": "^4.4.0",
+    "file-saver": "^2.0.5",
+    "html2canvas": "^1.4.1",
+    "html2pdf.js": "^0.14.0",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.7",
+    "lucide-react": "^1.8.0",
+    "multer": "^2.1.1",
+    "pdf-lib": "^1.17.1",
+    "pdfkit": "^0.18.0",
+    "react": "^19.2.4",
+    "react-chartjs-2": "^5.3.1",
+    "react-dom": "^19.2.4",
+    "react-router-dom": "^7.15.1",
+    "react-scripts": "^5.0.1",
+    "react-signature-canvas": "^1.1.0-alpha.2",
+    "sheetjs": "^2.0.0",
+    "uuid": "^14.0.0",
+    "web-vitals": "^2.1.4",
+    "xlsx": "^0.18.5"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "backend": "cd ../backend && npm run dev",
+    "dev": "concurrently \"npm start\" \"npm run backend\" --names \"🎨 FRONTEND,⚙️ BACKEND\" --prefix-colors \"cyan,green\"",
+    "dev:windows": "concurrently \"npm start\" \"cd ../backend && npm run dev\" --names \"FRONTEND,BACKEND\" --prefix-colors \"cyan,green\""
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "npm-run-all": "^4.1.5"
+  }
+}

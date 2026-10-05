@@ -1,0 +1,301 @@
+================================================================================
+SUMMARY OF CHANGES & UPDATED CODE SNIPPETS (COMMA FORMATTING & ZERO FIX)
+================================================================================
+
+--------------------------------------------------------------------------------
+1. FILE: frontend/src/components/InvoiceEditor.js
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Added `formatNumberWithCommas(val)` to format numbers in Indian locale (en-IN) live as the user types.
+• Added `parseFormattedNumber(val)` to strip commas before converting to float values.
+• Updated initial state for `received` to '' (empty string) and item `price` to '' so new/empty fields do not force a persistent '0'.
+• Replaced <input type="number"> with <input type="text" inputMode="decimal"> (or inputMode="numeric") for Quantity, Price/Unit, and Amount Received.
+• Updated `handleSave` and `isFormValid` to parse formatted number strings back into raw floats for database saving.
+• Locked Invoice Date to automatically use today's date in an uneditable/readOnly component, removing manual calendar date selection.
+• Locked Invoice Number in an uneditable/readOnly component to retain auto-generated numbering while preventing manual changes.
+
+UPDATED CODE SNIPPETS:
+
+// 1. Helper functions for comma formatting and parsing
+const formatNumberWithCommas = (val) => {
+    if (val === null || val === undefined || val === '') return '';
+    const str = String(val);
+    const cleaned = str.replace(/[^0-9.]/g, '');
+    if (!cleaned) return '';
+    const parts = cleaned.split('.');
+    let integerPart = parts[0];
+    if (integerPart.length > 1 && integerPart.startsWith('0')) {
+        integerPart = integerPart.replace(/^0+/, '') || '0';
+    }
+    const formattedInteger = integerPart !== '' ? Number(integerPart).toLocaleString('en-IN') : (parts.length > 1 ? '0' : '');
+    if (parts.length > 1) {
+        return `${formattedInteger}.${parts[1]}`;
+    }
+    return formattedInteger;
+};
+
+const parseFormattedNumber = (val) => {
+    if (val === null || val === undefined || val === '') return 0;
+    const cleanStr = String(val).replace(/,/g, '');
+    const num = parseFloat(cleanStr);
+    return isNaN(num) ? 0 : num;
+};
+
+// 2. Initial state & useEffect invoice loading
+const [formData, setFormData] = useState({
+    ...
+    received: '',
+    items: []
+});
+
+const formattedItems = invoice.items && invoice.items.length > 0 
+    ? invoice.items.map((item, index) => ({
+        id: item.id || `item_${Date.now()}_${index}`,
+        description: item.description || '',
+        hsn: item.hsn || '',
+        quantity: item.quantity !== undefined && item.quantity !== null && item.quantity !== '' ? formatNumberWithCommas(item.quantity) : '1',
+        price: item.price !== undefined && item.price !== null && item.price !== '' && item.price !== 0 ? formatNumberWithCommas(item.price) : ''
+    }))
+    : [{ id: '1', description: 'PROFESSIONAL FEE', hsn: '998399', quantity: '1', price: '' }];
+
+// 3. Save & Validation Handlers
+const handleSave = async () => {
+    ...
+    const apiData = {
+        ...
+        items: formData.items.map(item => ({
+            description: item.description,
+            hsn: item.hsn,
+            quantity: parseFormattedNumber(item.quantity) || 1,
+            price: parseFormattedNumber(item.price)
+        })),
+        received: parseFormattedNumber(formData.received),
+        ...
+    };
+    ...
+};
+
+const isFormValid = () => {
+    return (
+        formData.client_id &&
+        formData.bank_account_id &&
+        formData.items.length > 0 &&
+        formData.items.some(item => parseFormattedNumber(item.price) > 0 && item.description) &&
+        formData.invoice_number &&
+        formData.date &&
+        formData.place_of_supply
+    );
+};
+
+// 4. Input Fields JSX in Editor Form
+<input 
+    type="text" 
+    inputMode="numeric" 
+    className="fi" 
+    placeholder="1" 
+    value={item.quantity} 
+    onChange={(e) => updateItem(item.id, 'quantity', formatNumberWithCommas(e.target.value))} 
+/>
+
+<input 
+    type="text" 
+    inputMode="decimal" 
+    className="fi fmono" 
+    placeholder="0.00" 
+    value={item.price} 
+    onChange={(e) => updateItem(item.id, 'price', formatNumberWithCommas(e.target.value))} 
+/>
+
+<input 
+    type="text" 
+    inputMode="decimal" 
+    className="recv-input" 
+    placeholder="0.00" 
+    value={formData.received} 
+    onChange={(e) => updateFormData('received', formatNumberWithCommas(e.target.value))} 
+/>
+
+// 5. Locked / Uneditable Invoice No. & Invoice Date Components
+<input 
+    className="fi" 
+    value={formData.invoice_number || (invoiceNumberInfo.loading ? 'Generating...' : '')}
+    readOnly
+    style={{ 
+        flex: 1, 
+        fontFamily: 'monospace', 
+        fontWeight: 'bold', 
+        padding: '0.5rem 0.75rem', 
+        borderRadius: '0.5rem', 
+        border: '1px solid #cbd5e1', 
+        fontSize: '0.875rem',
+        backgroundColor: '#f1f5f9',
+        color: '#334155',
+        cursor: 'not-allowed'
+    }}
+    placeholder="JA/25-26/001"
+/>
+
+<input 
+    type="text"
+    className="fi"
+    value={formData.date || getTodayDateForDisplay()}
+    readOnly
+    style={{ 
+        flex: 1, 
+        padding: '0.5rem 0.75rem', 
+        borderRadius: '0.5rem', 
+        border: '1px solid #cbd5e1', 
+        fontSize: '0.875rem',
+        fontFamily: 'monospace',
+        fontWeight: '600',
+        backgroundColor: '#f1f5f9',
+        color: '#334155',
+        cursor: 'not-allowed'
+    }}
+/>
+
+
+--------------------------------------------------------------------------------
+2. FILE: frontend/src/components/InvoicePreview.js
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Added `parseNum` helper to sanitize string values containing commas before performing arithmetic operations.
+• Updated `calculateTotals` so subtotal, GST, total, and balance due calculate accurately with formatted numeric strings.
+• Updated `formatCurrency` and `itemsTableRows` map inside `getPrintHTML` so price and total amount render cleanly without NaN.
+
+UPDATED CODE SNIPPETS:
+
+const parseNum = (val) => {
+    if (val === undefined || val === null || val === '') return 0;
+    const clean = String(val).replace(/,/g, '');
+    const num = parseFloat(clean);
+    return isNaN(num) ? 0 : num;
+};
+
+const calculateTotals = () => {
+    const subtotal = (formData.items || []).reduce((sum, item) => {
+        const qty = parseNum(item.quantity);
+        const price = parseNum(item.price);
+        return sum + (qty * price);
+    }, 0);
+    
+    const sameState = isSameState();
+    let sgst = 0;
+    let cgst = 0;
+    let igst = 0;
+    
+    if (sameState) {
+        sgst = subtotal * 0.09;
+        cgst = subtotal * 0.09;
+    } else {
+        igst = subtotal * 0.18;
+    }
+    
+    const total = subtotal + sgst + cgst + igst;
+    const balance = total - parseNum(formData.received);
+    
+    return { subtotal, sgst, cgst, igst, total, balance, sameState };
+};
+
+const formatCurrency = (value) => {
+    const num = parseNum(value);
+    return `₹ ${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+const itemsTableRows = (formData.items || []).map((item, index) => {
+    const qty = parseNum(item.quantity) || 1;
+    const price = parseNum(item.price);
+    const amount = qty * price;
+    return `
+    <tr>
+        <td class="c">${index + 1}.</td>
+        <td>${item.description || 'PROFESSIONAL FEE'}</td>
+        <td>${item.hsn || '998399'}</td>
+        <td class="c">${item.quantity || 1}</td>
+        <td class="r">${formatCurrency(price)}</td>
+        <td class="r">${formatCurrency(amount)}</td>
+    </tr>
+`;
+}).join('');
+
+
+--------------------------------------------------------------------------------
+3. FILE: frontend/src/utils/generateSignedPDF.js
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Updated `calculateTotals` in signed PDF generator to strip commas from `quantity`, `price`, and `received` strings using `.replace(/,/g, '')`.
+
+UPDATED CODE SNIPPET:
+
+const calculateTotals = (formData) => {
+    ...
+    if (formData.items && Array.isArray(formData.items)) {
+        subtotal = formData.items.reduce((sum, item) => {
+            const quantity = parseFloat(String(item.quantity || 0).replace(/,/g, '')) || 0;
+            const price = parseFloat(String(item.price || 0).replace(/,/g, '')) || 0;
+            return sum + (quantity * price);
+        }, 0);
+    }
+    ...
+    const received = parseFloat(String(formData.received || 0).replace(/,/g, '')) || 0;
+    const balance = total - received;
+    ...
+};
+
+
+--------------------------------------------------------------------------------
+4. FILE: frontend/src/components/Dashboard.js
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Converted input field in Receive Payment Modal to type="text" with inputMode="decimal".
+• Added `handleAmountChange` to dynamically format entered amount with commas.
+• Updated `handleConfirm` to parse amount string with `.replace(/,/g, '')`.
+
+UPDATED CODE SNIPPET:
+
+useEffect(() => {
+    if (isOpen) {
+        setAmount(currentReceived ? Number(currentReceived).toLocaleString('en-IN') : '');
+        setError('');
+    }
+}, [isOpen, currentReceived]);
+
+const handleConfirm = () => {
+    const amt = parseFloat(String(amount).replace(/,/g, ''));
+    if (isNaN(amt) || amt < 0) {
+        setError('Please enter a valid amount');
+        return;
+    }
+    if (amt === 0) {
+        setError('Amount received cannot be zero');
+        return;
+    }
+    onConfirm(amt);
+};
+
+const handleAmountChange = (val) => {
+    const cleaned = val.replace(/[^0-9.]/g, '');
+    if (!cleaned) {
+        setAmount('');
+        return;
+    }
+    const parts = cleaned.split('.');
+    let integerPart = parts[0];
+    if (integerPart.length > 1 && integerPart.startsWith('0')) {
+        integerPart = integerPart.replace(/^0+/, '') || '0';
+    }
+    const formattedInteger = integerPart !== '' ? Number(integerPart).toLocaleString('en-IN') : (parts.length > 1 ? '0' : '');
+    const formatted = parts.length > 1 ? `${formattedInteger}.${parts[1]}` : formattedInteger;
+    setAmount(formatted);
+};
+
+<input 
+    type="text" 
+    inputMode="decimal" 
+    className="ja-text-input" 
+    value={amount} 
+    onChange={e => handleAmountChange(e.target.value)} 
+    placeholder="Enter amount in rupees" 
+    autoFocus 
+/>
+================================================================================

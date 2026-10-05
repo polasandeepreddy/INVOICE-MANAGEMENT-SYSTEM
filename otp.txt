@@ -1,0 +1,301 @@
+================================================================================
+🔒 ADVANCED INVOICE DELETION AUTHENTICATION — REQUEST OTP EMAIL VERIFICATION
+================================================================================
+
+SUMMARY OF FEATURE IMPLEMENTATION:
+--------------------------------------------------------------------------------
+Invoice deletion uses a clean, non-redundant, two-step explicit OTP request 
+and email verification system via Admin Email.
+
+UI & UX Improvements:
+1. Person Full Name Tracking: Now captures and displays the FULL NAME of the person 
+   deleting/requesting the deletion (e.g., Demo Admin / Demo Super Admin) instead 
+   of just their email address.
+2. Email Notification: The email sent to ADMIN_EMAIL (jayaramaassociates.info@gmail.com) 
+   prominently displays:
+   - Subject: 🗑️ Security Verification: Invoice Deletion Request by [Person Name] - #[Invoice Number]
+   - Table Row: Requested By (Person Name): [Person Name] (email@example.com)
+3. Single Unified Details Card: Eliminates duplicate/repeated invoice numbers. 
+   Presents Invoice Number (#JA/26-27/013), Client Name, Requested By (Person Name), 
+   and Total Amount in one clear, high-contrast card.
+4. Step 1 (Pre-OTP): Displays invoice details first with a prominent "📩 Request OTP" button.
+5. Step 2 (Post-OTP): Once requested, the backend generates a 6-digit OTP and emails it to Admin.
+   Transitions smoothly to OTP input box, resend link, and "🗑️ Verify & Delete" button.
+6. Backend Verification: Verifies OTP correctness, expiry (10 min), and attempt limits 
+   before deleting the invoice from MySQL database.
+
+
+================================================================================
+1. BACKEND CHANGES: backend/server.js
+================================================================================
+
+A) IN-MEMORY DELETION OTP STORE (Line 89):
+--------------------------------------------------------------------------------
+const deleteOtpStore = new Map();
+
+
+B) ENDPOINT: POST /api/invoices/:id/send-delete-otp (Line 2045):
+--------------------------------------------------------------------------------
+// 1. Send OTP to ADMIN Email for Invoice Deletion
+app.post('/api/invoices/:id/send-delete-otp', authenticateToken, authorizeAdmin, async (req, res) => {
+    try {
+        const invoiceId = req.params.id;
+        
+        // Check if invoice exists
+        const [invoices] = await promiseDb.execute(
+            'SELECT id, invoice_number, client_name, total_amount FROM invoices WHERE id = ?',
+            [invoiceId]
+        );
+
+        if (invoices.length === 0) {
+            return res.status(404).json({ error: 'Invoice not found' });
+        }
+
+        const invoice = invoices[0];
+        const adminEmail = process.env.ADMIN_EMAIL || 'jayaramaassociates.info@gmail.com';
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+        // Fetch requesting user's full name from DB
+        let requestorName = req.user.full_name || req.user.username || req.user.email;
+        if (req.user.id) {
+            const [uRows] = await promiseDb.execute('SELECT full_name, username FROM users WHERE id = ?', [req.user.id]);
+            if (uRows.length > 0 && uRows[0].full_name) {
+                requestorName = uRows[0].full_name;
+            }
+        }
+
+        // Store deletion OTP in Map
+        deleteOtpStore.set(`delete_otp_${invoiceId}`, {
+            otp,
+            invoiceId,
+            invoiceNumber: invoice.invoice_number,
+            expiresAt,
+            attempts: 0,
+            requestedByEmail: req.user.email,
+            requestedByName: requestorName
+        });
+
+        // Send Email to ADMIN_EMAIL
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: adminEmail,
+            subject: `🗑️ Security Verification: Invoice Deletion Request by ${requestorName} - #${invoice.invoice_number}`,
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px; background-color: #ffffff;">
+                    <div style="background-color: #dc2626; color: white; padding: 15px 20px; border-radius: 8px 8px 0 0; text-align: center;">
+                        <h2 style="margin: 0; font-size: 20px;">⚠️ Invoice Deletion Security Verification</h2>
+                    </div>
+                    <div style="padding: 20px; color: #1e293b;">
+                        <p style="font-size: 15px;">A request has been initiated to <strong>permanently delete</strong> an invoice from the system.</p>
+                        
+                        <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin: 15px 0;">
+                            <table style="width: 100%; font-size: 14px; border-collapse: collapse;">
+                                <tr>
+                                    <td style="padding: 6px 0; color: #64748b; font-weight: bold;">Invoice Number:</td>
+                                    <td style="padding: 6px 0; font-weight: bold; color: #dc2626;">#${invoice.invoice_number}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 6px 0; color: #64748b; font-weight: bold;">Client Name:</td>
+                                    <td style="padding: 6px 0;">${invoice.client_name || 'N/A'}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 6px 0; color: #64748b; font-weight: bold;">Invoice Total:</td>
+                                    <td style="padding: 6px 0; font-weight: bold;">₹ ${Number(invoice.total_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 6px 0; color: #64748b; font-weight: bold;">Requested By (Person Name):</td>
+                                    <td style="padding: 6px 0; font-weight: bold; color: #0f172a;">${requestorName} <span style="color: #64748b; font-weight: normal;">(${req.user.email})</span></td>
+                                </tr>
+                            </table>
+                        </div>
+
+                        <p style="font-size: 14px; text-align: center; margin-top: 20px; color: #475569;">
+                            Please share the following One-Time Password (OTP) with the user to authorize this deletion:
+                        </p>
+
+                        <div style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #00AEEF; background-color: #f0f9ff; border: 2px dashed #00AEEF; border-radius: 8px; padding: 15px; text-align: center; margin: 20px 0;">
+                            ${otp}
+                        </div>
+
+                        <p style="font-size: 13px; color: #ef4444; text-align: center;">
+                            ⏰ This OTP is valid for <strong>10 minutes</strong> only.
+                        </p>
+
+                        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+                        <p style="font-size: 12px; color: #94a3b8; text-align: center;">
+                            If you did not authorize this invoice deletion request, please inspect your system logs immediately.
+                        </p>
+                    </div>
+                </div>
+            `
+        };
+
+        await transporter.sendMail(mailOptions);
+        console.log(`📧 Deletion OTP sent to ADMIN (${adminEmail}) for invoice #${invoice.invoice_number} by ${requestorName}`);
+
+        res.json({
+            success: true,
+            message: 'OTP sent to Admin Email for deletion authorization',
+            adminEmail: adminEmail,
+            invoiceNumber: invoice.invoice_number
+        });
+    } catch (error) {
+        console.error('Send deletion OTP error:', error);
+        res.status(500).json({ error: 'Failed to send deletion OTP email: ' + error.message });
+    }
+});
+
+
+================================================================================
+2. FRONTEND CHANGES: frontend/src/components/Dashboard.js
+================================================================================
+
+A) COMPONENT: DeleteOTPModal (Line 1638):
+--------------------------------------------------------------------------------
+const DeleteOTPModal = ({ 
+  isOpen, 
+  onClose, 
+  onRequestOTP,
+  onVerifyAndDelete, 
+  isSendingOtp,
+  otpRequested,
+  isSubmitting, 
+  otp, 
+  setOtp, 
+  invoiceId, 
+  invoices,
+  targetAdminEmail,
+  requestorName
+}) => {
+  useEffect(() => {
+    if (isOpen) {
+      setOtp('');
+    }
+  }, [isOpen, setOtp]);
+
+  if (!isOpen) return null;
+  const invoice = invoices ? invoices.find(i => i.id === invoiceId) : null;
+  const invoiceNumber = invoice?.invoice_number || invoice?.invoice_no || invoiceId;
+  const clientName = invoice?.client_name || 'N/A';
+  const totalAmount = invoice?.total_amount ? `₹ ${Number(invoice.total_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : 'N/A';
+  const displayAdminEmail = targetAdminEmail || 'jayaramaassociates.info@gmail.com';
+
+  return (
+    <div className="ja-overlay" onClick={onClose}>
+      <div className="ja-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520, borderRadius: 12, overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }}>
+        {/* Header */}
+        <div className="ja-modal-header" style={{ background: '#fff1f2', borderBottom: '1px solid #ffe4e6', padding: '18px 24px' }}>
+          <div className="ja-modal-title" style={{ color: '#e11d48', fontSize: '1.15rem', fontWeight: 700, letterSpacing: '-0.3px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>🗑️</span>
+            <span>Confirm Invoice Deletion</span>
+          </div>
+          <button className="ja-modal-close" onClick={onClose} style={{ color: '#9f1239' }}>×</button>
+        </div>
+
+        <div style={{ padding: '24px' }}>
+          {/* SINGLE Unified Warning & Details Card (NO REPETITION) */}
+          <div style={{ background: '#ffffff', border: '1.5px solid #fecdd3', borderRadius: 10, overflow: 'hidden', marginBottom: 22, boxShadow: '0 2px 4px rgba(225, 29, 72, 0.05)' }}>
+            <div style={{ background: '#fff1f2', color: '#9f1239', padding: '10px 14px', fontSize: '0.85rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid #ffe4e6' }}>
+              <span style={{ fontSize: '1.1rem' }}>⚠️</span>
+              <span>Permanent Deletion Action</span>
+            </div>
+            
+            <div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 16px', fontSize: '0.88rem' }}>
+              <div>
+                <span style={{ color: '#64748b', display: 'block', fontSize: '0.76rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Invoice Number</span>
+                <strong style={{ color: '#e11d48', fontSize: '0.98rem', fontFamily: 'monospace', letterSpacing: '0.5px' }}>#{invoiceNumber}</strong>
+              </div>
+              <div>
+                <span style={{ color: '#64748b', display: 'block', fontSize: '0.76rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Client Name</span>
+                <strong style={{ color: '#1e293b', fontSize: '0.95rem' }}>{clientName}</strong>
+              </div>
+              <div>
+                <span style={{ color: '#64748b', display: 'block', fontSize: '0.76rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Requested By</span>
+                <strong style={{ color: '#0f172a', fontSize: '0.92rem' }}>👤 {requestorName || 'Admin'}</strong>
+              </div>
+              <div>
+                <span style={{ color: '#64748b', display: 'block', fontSize: '0.76rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Amount</span>
+                <strong style={{ fontSize: '1.05rem', color: '#0f172a', fontWeight: 800 }}>{totalAmount}</strong>
+              </div>
+            </div>
+          </div>
+
+          {!otpRequested ? (
+            /* STEP 1: PRE-REQUEST OTP PROMPT */
+            <div>
+              <div style={{ background: '#f0f9ff', border: '1.5px solid #bae6fd', borderRadius: 8, padding: '14px 16px', marginBottom: 24, color: '#0369a1', fontSize: '0.88rem', lineHeight: 1.6, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <span style={{ fontSize: '1.3rem', marginTop: 2 }}>🔐</span>
+                <div>
+                  <strong>Security Verification:</strong> An OTP will be sent to Admin Email (<strong>{displayAdminEmail}</strong>) to authorize deletion.
+                </div>
+              </div>
+
+              <div className="ja-modal-actions" style={{ display: 'flex', gap: 12, marginTop: 28, justifyContent: 'flex-end' }}>
+                <button className="ja-btn-cancel-act" onClick={onClose} disabled={isSendingOtp}
+                  style={{ padding: '10px 20px', border: '1.5px solid #cbd5e1', borderRadius: 6, background: 'white', color: '#475569', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s' }}>
+                  Cancel
+                </button>
+                <button className="ja-btn-confirm-danger" onClick={onRequestOTP} disabled={isSendingOtp}
+                  style={{ padding: '11px 24px', border: 'none', borderRadius: 6, background: isSendingOtp ? '#93c5fd' : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', color: 'white', fontWeight: 600, cursor: isSendingOtp ? 'not-allowed' : 'pointer', boxShadow: '0 4px 6px -1px rgba(2, 132, 199, 0.2)', transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: 8, minWidth: 180, justifyContent: 'center' }}>
+                  {isSendingOtp ? (<><span className="ja-spinner" style={{ width: 15, height: 15, borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)', borderTopColor: 'white' }}/><span>Sending OTP…</span></>) : (<><span>📩</span><span>Request OTP</span></>)}
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* STEP 2: ENTER OTP & VERIFY DELETE */
+            <div>
+              <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: 8, padding: '14px 16px', marginBottom: 24, color: '#15803d', fontSize: '0.88rem', lineHeight: 1.6, display: 'flex', gap: 12, alignItems: 'center' }}>
+                <span style={{ fontSize: '1.3rem' }}>✅</span>
+                <div>
+                  <strong>OTP Sent!</strong> Check Admin Email (<strong>{displayAdminEmail}</strong>) and enter the 6-digit code.
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <label className="ja-field-label" style={{ fontWeight: 600, color: '#334155', margin: 0 }}>
+                    Enter 6-Digit Admin OTP <span style={{ color: '#e11d48', marginLeft: 4, fontWeight: 700 }}>*</span>
+                  </label>
+                  <button 
+                    type="button" 
+                    onClick={onRequestOTP} 
+                    disabled={isSendingOtp || isSubmitting}
+                    style={{ background: 'none', border: 'none', color: '#0284c7', fontWeight: 600, fontSize: '0.82rem', cursor: (isSendingOtp || isSubmitting) ? 'not-allowed' : 'pointer', textDecoration: 'underline' }}>
+                    {isSendingOtp ? 'Sending...' : '↻ Resend OTP'}
+                  </button>
+                </div>
+                <input 
+                  type="text" 
+                  maxLength={6}
+                  className="ja-input" 
+                  value={otp} 
+                  onChange={e => setOtp(e.target.value.replace(/\D/g, ''))}
+                  placeholder="• • • • • •" 
+                  disabled={isSubmitting || isSendingOtp} 
+                  autoFocus
+                  autoComplete="off" 
+                  name="delete_invoice_otp_input"
+                  onKeyPress={e => e.key === 'Enter' && !isSubmitting && otp.length === 6 && onVerifyAndDelete()}
+                  style={{ width: '100%', padding: '12px', border: '2px solid #0284c7', borderRadius: 8, fontSize: '1.25rem', fontWeight: 700, textAlign: 'center', letterSpacing: '10px', boxSizing: 'border-box', boxShadow: '0 2px 4px rgba(2, 132, 199, 0.08)' }}
+                />
+              </div>
+
+              <div className="ja-modal-actions" style={{ display: 'flex', gap: 12, marginTop: 28, justifyContent: 'flex-end' }}>
+                <button className="ja-btn-cancel-act" onClick={onClose} disabled={isSubmitting}
+                  style={{ padding: '10px 20px', border: '1.5px solid #cbd5e1', borderRadius: 6, background: 'white', color: '#475569', fontWeight: 600, cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}>
+                  Cancel
+                </button>
+                <button className="ja-btn-confirm-danger" onClick={onVerifyAndDelete} disabled={isSubmitting || isSendingOtp || otp.trim().length !== 6}
+                  style={{ padding: '11px 24px', border: 'none', borderRadius: 6, background: isSubmitting || isSendingOtp || otp.trim().length !== 6 ? '#fca5a5' : 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)', color: 'white', fontWeight: 600, cursor: isSubmitting || isSendingOtp || otp.trim().length !== 6 ? 'not-allowed' : 'pointer', opacity: isSubmitting || isSendingOtp || otp.trim().length !== 6 ? 0.7 : 1, boxShadow: '0 4px 6px -1px rgba(225, 29, 72, 0.2)', transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: 8, minWidth: 170, justifyContent: 'center' }}>
+                  {isSubmitting ? (<><span className="ja-spinner" style={{ width: 15, height: 15, borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)', borderTopColor: 'white' }}/><span>Verifying…</span></>) : (<><span>🗑️</span><span>Verify & Delete</span></>)}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+================================================================================

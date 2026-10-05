@@ -1,0 +1,398 @@
+================================================================================
+SUMMARY OF CHANGES & UPDATED CODE SNIPPETS
+================================================================================
+#Update-1  
+
+1. COMPONENT: frontend/src/utils/generateSignedPDF.js
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Replaced coordinate-based pdf drawing (doc.text(), doc.rect()) with HTML/CSS 
+  rendering matching InvoicePreview.js.
+• Renders off-screen A4 container using html2canvas (scale 3) into jsPDF.
+• Retains logo, Times New Roman typography, cyan (#00AEEF) headers, tax rules, 
+  bank info, and signature image/badge.
+
+UPDATED CODE:
+
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
+
+const COMPANY_LOGO_URL = "/JAYARAMA LOGO1.png";
+const FALLBACK_LOGO = `data:image/svg+xml;base64,...`;
+const COMPLETE_BUSINESS_ADDRESS = `Plot No: 12, Road No: 1A, Czech Colony, Sanath Nagar, Hyderabad - 500018...`;
+
+// Currency formatter
+const formatCurrency = (value) => {
+    if (value === undefined || value === null || isNaN(value)) return '₹ 0.00';
+    return `₹ ${Number(value).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+// Number to Words converter
+const numberToWords = (num) => { ... };
+
+
+// HTML Template Builder matching InvoicePreview.js
+const buildInvoiceHTMLString = (formData) => {
+    const totals = calculateTotals(formData);
+    const hasSignature = !!(...);
+    const isCloudSigned = (...);
+    let signatureSrc = hasSignature ? (...) : '';
+
+    return `
+        <div class="invoice-doc" style="font-family: 'Times New Roman', Times, serif; background: white; padding: 1.5cm; width: 210mm; margin: 0 auto; color: #000000;">
+            <!-- Logo & Business Address -->
+            ...
+            <!-- Tax Invoice Header (#00AEEF) -->
+            ...
+            <!-- Client Info & Metadata -->
+            ...
+            <!-- Items Table (#00AEEF Table Header) -->
+            ...
+            <!-- Description, Amount in Words & Totals Box -->
+            ...
+            <!-- Pay To Bank Details & Signature Section -->
+            <div style="display: flex; justify-content: space-between;">
+                <div>Pay To Bank Details...</div>
+                <div style="text-align: right;">
+                    For : JAYARAMA ASSOCIATES
+                    ${hasSignature ? `<img src="${signatureSrc}" style="width:180px; height:80px; object-fit:contain;" />` : ''}
+                    Authorized Signatory
+                    ${isCloudSigned ? `<span style="background:#4c9aff; color:white; font-size:8px;">✓ Digitally Signed</span>` : ''}
+                </div>
+            </div>
+        </div>
+    `;
+};
+
+// Render HTML into canvas and export PDF
+const renderInvoicePDFDoc = async (formData) => {
+    const container = document.createElement('div');
+    container.style.position = 'absolute';
+    container.style.left = '-9999px';
+    container.style.width = '210mm';
+    container.innerHTML = buildInvoiceHTMLString(formData);
+    document.body.appendChild(container);
+
+    try {
+        const canvas = await html2canvas(container.firstElementChild, { scale: 3, useCORS: true });
+        const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+        pdf.addImage(canvas.toDataURL('image/jpeg', 1.0), 'JPEG', 0, 0, 210, (canvas.height * 210) / canvas.width);
+        return pdf;
+    } finally {
+        if (container.parentNode) container.parentNode.removeChild(container);
+    }
+};
+
+export { generateSignedPDF, generateSignedPDFBlob, generateSignedPDFDataUrl };
+
+
+--------------------------------------------------------------------------------
+2. COMPONENT: database/schema.sql
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Added full database initialization DDL (users, clients, bank_accounts, invoices, invoice_items, state_mapping).
+• Added demo seed credentials for User, Admin, and Super Admin.
+
+UPDATED CODE:
+
+CREATE DATABASE IF NOT EXISTS invoice_manager;
+USE invoice_manager;
+
+CREATE TABLE IF NOT EXISTS users (...);
+CREATE TABLE IF NOT EXISTS clients (...);
+CREATE TABLE IF NOT EXISTS bank_accounts (...);
+CREATE TABLE IF NOT EXISTS invoices (...);
+CREATE TABLE IF NOT EXISTS invoice_items (...);
+CREATE TABLE IF NOT EXISTS state_mapping (...);
+
+-- Demo Credentials Seed Data
+INSERT INTO users (id, full_name, username, email, password, role) VALUES
+('usr_demo_user', 'Demo User', 'Demouser', 'Demouser@gmail.com', '$2a$10$89D5i5vW1y/lAepq2f66E.tGq5p0l088qQ7C2eZ7s28hZ7J0507.m', 'user'),
+('usr_demo_admin', 'Demo Admin', 'Demoadmin', 'Demoadmins@gmail.com', '$2a$10$Q7a79n.i6E63e9fE72e4G.uX.j.9F9aE.s2.H8d47b0e12.18181O', 'admin'),
+('usr_demo_superadmin', 'Demo Super Admin', 'Demosuperadmin', 'Demosuperadmin@gmail.com', '$2a$10$R9n7u0t287h27J83e92.e.H8d47b0e12.18181O29u38n.28282O', 'super_admin')
+ON DUPLICATE KEY UPDATE full_name=VALUES(full_name), username=VALUES(username), role=VALUES(role);
+
+
+--------------------------------------------------------------------------------
+3. CONFIGURATION: backend/.env
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Updated DB_PASSWORD=1234.
+
+UPDATED CODE:
+
+PORT=5000
+DB_HOST=localhost
+DB_USER=root
+DB_PASSWORD=1234
+DB_NAME=invoice_manager
+JWT_SECRET=NEW_SUPER_SECRET_KEY
+EMAIL_USER=jayaramaassociates.info@gmail.com
+EMAIL_PASS=fmngutqpatuofjwj
+ADMIN_EMAIL=jayaramaassociates.info@gmail.com
+CLOUDSIGNER_URL=http://localhost:1621
+CLOUDSIGNER_API_KEY=Sample
+CLOUDSIGNER_CERTIFICATE_ID=2ECA112007
+
+================================================================================
+
+# Update2:-
+
+1. COMPONENT: frontend/src/components/Dashboard.js
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Prevented automatic browser password autofill in DeleteCredentialModal.
+• Added useEffect hook to force reset username ('') and password ('') to empty strings on modal open.
+• Added autoComplete="new-password" and autoComplete="off" with explicit field names to force SuperAdmin manual password entry.
+
+UPDATED CODE:
+
+const DeleteCredentialModal = ({ isOpen, onClose, onDelete, isSubmitting, username, setUsername, password, setPassword, invoiceId, invoices }) => {
+  useEffect(() => {
+    if (isOpen) {
+      setUsername('');
+      setPassword('');
+    }
+  }, [isOpen, setUsername, setPassword]);
+
+  if (!isOpen) return null;
+  const invoice = invoices ? invoices.find(i => i.id === invoiceId) : null;
+  const invoiceNumber = invoice?.invoice_number || invoice?.invoice_no || invoiceId;
+  
+  return (
+    <div className="ja-overlay" onClick={onClose}>
+      <div className="ja-modal" onClick={e => e.stopPropagation()}>
+        ...
+        <input type="text" className="ja-input" value={username} onChange={e => setUsername(e.target.value)}
+          placeholder="e.g. admin@company.com or superadmin" disabled={isSubmitting} autoFocus
+          autoComplete="off" name="superadmin_delete_username_field" />
+
+        <input type="password" className="ja-input" value={password} onChange={e => setPassword(e.target.value)}
+          placeholder="Enter password manually" disabled={isSubmitting}
+          autoComplete="new-password" name="superadmin_delete_password_field"
+          onKeyPress={e => e.key === 'Enter' && !isSubmitting && username.trim() && password.trim() && onDelete()} />
+        ...
+      </div>
+    </div>
+  );
+};
+
+
+--------------------------------------------------------------------------------
+2. COMPONENT: frontend/src/config.js (NEW FILE)
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Resolves backend API URL dynamically based on window.location.hostname or process.env.REACT_APP_API_URL.
+• Eliminates hardcoded 'http://localhost:5000' network connection errors when deployed on server.
+
+UPDATED CODE:
+
+const getApiBaseUrl = () => {
+    if (process.env.REACT_APP_API_URL) {
+        return process.env.REACT_APP_API_URL;
+    }
+    const hostname = window.location.hostname || 'localhost';
+    const protocol = window.location.protocol || 'http:';
+    return `${protocol}//${hostname}:5000`;
+};
+
+export const API_BASE_URL = getApiBaseUrl();
+export const API_URL = `${API_BASE_URL}/api`;
+export default API_BASE_URL;
+
+
+--------------------------------------------------------------------------------
+3. COMPONENT: frontend/src/App.js & frontend/src/components/Auth.js
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Configured global axios defaults to use dynamic API_BASE_URL from ./config.
+• Cleaned up unused state variables (loading).
+
+UPDATED CODE:
+
+import { API_BASE_URL } from './config';
+axios.defaults.baseURL = API_BASE_URL;
+
+
+--------------------------------------------------------------------------------
+4. COMPONENTS: InvoiceEditor.js, ClientManager.js, BankAccountManager.js
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Updated component API handlers to use API_URL from ../config.
+• Cleaned up unused variables and unused imports for 0 ESLint warnings.
+
+UPDATED CODE:
+
+import { API_URL } from '../config';
+
+
+--------------------------------------------------------------------------------
+5. COMPONENT: backend/server.js
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Updated Express CORS origin handler to support server IP origins and process.env.CORS_ORIGIN.
+
+UPDATED CODE:
+
+const allowedOrigins = process.env.CORS_ORIGIN 
+    ? process.env.CORS_ORIGIN.split(',') 
+    : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'];
+
+const corsOptions = {
+    origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) !== -1 || !process.env.CORS_ORIGIN) {
+            return callback(null, true);
+        }
+        return callback(null, true);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    exposedHeaders: ['Authorization'],
+    optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+================================================================================
+
+--------------------------------------------------------------------------------
+6. COMPONENT: backend/server.js - Pre-OTP User Existence Validation
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Added database checks for username and email in POST /api/auth/send-otp BEFORE sending OTP to admin.
+• If username or email already exists in users table, rejects request immediately with 400 Bad Request instead of waiting until post-OTP registration.
+
+UPDATED CODE:
+
+app.post('/api/auth/send-otp', async (req, res) => {
+    const { adminEmail, userEmail, fullName, username } = req.body;
+    ...
+    // 1. Check if username already exists in database BEFORE sending OTP
+    if (username && username.trim()) {
+        const [existingUsername] = await promiseDb.execute(
+            'SELECT id FROM users WHERE username = ?',
+            [username.trim()]
+        );
+        if (existingUsername.length > 0) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'This username already exists' 
+            });
+        }
+    }
+
+    // 2. Check if email already exists in database BEFORE sending OTP
+    if (userEmail && userEmail.trim()) {
+        const [existingEmail] = await promiseDb.execute(
+            'SELECT id FROM users WHERE email = ?',
+            [userEmail.trim()]
+        );
+        if (existingEmail.length > 0) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'This email ID already exists' 
+            });
+        }
+    }
+    ...
+});
+
+--------------------------------------------------------------------------------
+7. COMPONENT: frontend/src/components/Auth.js
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Enhanced handleRequestOTP error extraction to capture both err.response.data.message and err.response.data.error.
+
+UPDATED CODE:
+
+if (err.response) {
+    setError(err.response.data?.message || err.response.data?.error || 'Failed to send registration request');
+}
+
+
+--------------------------------------------------------------------------------
+8. COMPONENT: frontend/src/components/Dashboard.js & backend/server.js - Advanced Invoice Deletion OTP
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Redesigned DeleteOTPModal into a 2-step workflow with explicit "Request OTP" button.
+• Combined permanent deletion warning & invoice details into a single non-redundant grid card.
+• Tracked Requesting Person Full Name (req.user.full_name) in database and displayed in both DeleteOTPModal and email subject/body.
+
+UPDATED CODE:
+
+const DeleteOTPModal = ({ isOpen, onClose, onRequestOTP, onVerifyAndDelete, isSendingOtp, otpRequested, isSubmitting, otp, setOtp, invoiceId, invoices, targetAdminEmail, requestorName }) => {
+    ...
+};
+--------------------------------------------------------------------------------
+9. COMPONENT: backend/server.js & frontend/src/components/Auth.js - Step-Ahead Duplicate User Check
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Created POST /api/auth/check-user-exists backend endpoint to perform instant database lookups.
+• Added handleCheckUsernameBlur and handleCheckEmailBlur onBlur handlers to Auth.js.
+• Triggers real-time check while entering username and email address before submitting or filling other details.
+• Displays "This username already exists" or "This email ID already exists" instantly on blur.
+
+UPDATED CODE:
+
+app.post('/api/auth/check-user-exists', async (req, res) => {
+    const { username, email } = req.body;
+    if (username) { ... if (exists) return res.json({ exists: true, message: 'This username already exists' }); }
+    if (email) { ... if (exists) return res.json({ exists: true, message: 'This email ID already exists' }); }
+});
+
+--------------------------------------------------------------------------------
+10. COMPONENT: frontend/src/components/InvoiceEditor.js - Super Admin Single Date Picker Input
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Replaced dual inputs with a clean single <input type="date"> component for Super Admin date selection in InvoiceEditor.js.
+• Super Admin clicks on the input to select any date directly from the native calendar picker.
+• Kept invoice date locked to readOnly for both regular Users and Admins with "(🔒 Locked to Today)".
+
+UPDATED CODE:
+
+<div>
+    <label style={{ fontSize: '0.75rem', fontWeight: '600', marginBottom: '0.375rem', display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#475569' }}>
+        Invoice Date {userRole === 'super_admin' ? <span style={{ fontSize: '0.7rem', color: '#0284c7', fontWeight: 'bold' }}>(📅 Select Date)</span> : <span style={{ fontSize: '0.7rem', color: '#64748b' }}>(🔒 Locked to Today)</span>}
+    </label>
+    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        {userRole === 'super_admin' ? (
+            <input 
+                type="date"
+                className="fi"
+                value={formData.datePickerValue}
+                onChange={handleDatePickerChange}
+                style={{ 
+                    flex: 1, 
+                    padding: '0.5rem 0.75rem', 
+                    borderRadius: '0.5rem', 
+                    border: '1.5px solid #0284c7', 
+                    fontSize: '0.875rem',
+                    fontFamily: 'monospace',
+                    fontWeight: '600',
+                    backgroundColor: '#ffffff',
+                    color: '#0f172a',
+                    cursor: 'pointer'
+                }}
+            />
+        ) : (
+            <input type="text" className="fi" value={formData.date || getTodayDateForDisplay()} readOnly style={{ flex: 1, padding: '0.5rem 0.75rem', borderRadius: '0.5rem', border: '1px solid #cbd5e1', fontSize: '0.875rem', fontFamily: 'monospace', fontWeight: '600', backgroundColor: '#f1f5f9', color: '#334155', cursor: 'not-allowed' }} />
+        )}
+    </div>
+</div>
+================================================================================
+# Update-3: CloudSigner Cryptographic Digital Signature & Alignment Fix
+--------------------------------------------------------------------------------
+1. COMPONENT: backend/server.js & backend/utils/generateInvoicePDF.js
+--------------------------------------------------------------------------------
+SUMMARY OF CHANGES:
+• Eliminated post-signing pdf-lib PDFDocument re-serialization. Re-saving signed
+  PDFs with pdf-lib stripped /ByteRange and /Contents, causing Adobe Acrobat error:
+  "Signature contains incorrect, unrecognized, corrupted or suspicious data (SigDict /Contents illegal data)".
+• Attachments and main invoice are now combined BEFORE signing so the entire document
+  is digitally signed in one pass, and the raw signed buffer is uploaded directly to Google Drive.
+• Fixed signature stamp vertical squishing by enforcing minimum dimensions (width: 180pt, height: 65pt)
+  and expanding the HTML gap between "For : JAYARAMA ASSOCIATES" and "Authorized Signatory" from 65px to 90px.
+• Enforced strict CloudSigner payload schema: options: { reason, locations, customtext } and root location: [x, y, w, h].
+================================================================================
