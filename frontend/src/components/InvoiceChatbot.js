@@ -310,7 +310,7 @@ const InvoiceChatbot = ({ user }) => {
           flex: 1;
           padding: 16px;
           overflow-y: auto;
-          background: #f8fafc;
+          background: linear-gradient(rgba(248,250,252,0.86), rgba(248,250,252,0.86)), url('/JAYARAMA LOGO1.png') center / 65% auto no-repeat;
           display: flex;
           flex-direction: column;
           gap: 12px;
