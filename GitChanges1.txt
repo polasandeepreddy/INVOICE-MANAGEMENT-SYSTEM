@@ -1,0 +1,16 @@
+GitChanges1.txt - Chat logo watermark (follow-up to live messaging PR #1)
+
+FILES CHANGED
+ 1. frontend/src/components/LiveChat.js        - watermark on live messaging message area (.ja-lc-msgs)
+ 2. frontend/src/components/InvoiceChatbot.js  - watermark on assistant message area (.ja-chatbot-body)
+ 3. GitChanges1.txt                            - this file
+
+CHANGES
+ - JAYARAMA logo (/JAYARAMA LOGO1.png, already in frontend/public) is shown as a faded,
+   centered background behind the chatbot (Assistant tab) and live messaging messages.
+ - Implemented as CSS only: a translucent gradient layered over the logo so text, bubbles
+   and ticks stay readable. No JS, API or DB changes.
+
+The live messaging feature itself (tables chat_messages/chat_receipts, /api/chat/* endpoints,
+3 s polling with after=<lastId> cursor, SQL-enforced DM privacy, broadcast channel, ticks,
+read rules) was delivered in PR #1 and is unchanged here.

@@ -189,7 +189,7 @@ export const LiveChatPanel = ({ user, chat, activeThread, setActiveThread }) => 
         .ja-lc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
         .ja-lc-head { padding: 8px 12px; background: #f0f2f5; border-bottom: 1px solid #e2e8f0; font-size: 0.78rem; font-weight: 700; color: #0f172a; }
         .ja-lc-head small { display: block; font-weight: 500; color: #64748b; font-size: 0.64rem; }
-        .ja-lc-msgs { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+        .ja-lc-msgs { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; background: linear-gradient(rgba(239,234,226,0.86), rgba(239,234,226,0.86)), url('/JAYARAMA LOGO1.png') center / 60% auto no-repeat; }
         .ja-lc-msg { max-width: 85%; padding: 6px 9px; border-radius: 8px; font-size: 0.78rem; line-height: 1.4; word-break: break-word; white-space: pre-wrap; box-shadow: 0 1px 1px rgba(0,0,0,.08); }
         .ja-lc-msg.me { align-self: flex-end; background: #d9fdd3; border-top-right-radius: 2px; }
         .ja-lc-msg.them { align-self: flex-start; background: #fff; border-top-left-radius: 2px; }
